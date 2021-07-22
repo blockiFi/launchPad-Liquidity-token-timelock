@@ -933,8 +933,32 @@ contract LaunchPad is Ownable{
      uint256 tresholdExtraRate;
      uint256 nounce;
      IUniswapV2Router02 testSwapRouter = IUniswapV2Router02(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+     ItokenTimeLock tokenTimeLocker ;
+     ILiquidityTimeLock liquidityTimeLocker;
      address[] public AMM;
+     function updateTresholdExtraRate(uint256 _tresholdExtraRate) public onlyOwner{
+      require(_tresholdExtraRate <= 100 ,"invalid percentage" );
+         tresholdExtraRate = _tresholdExtraRate;   
+     }
+     
      mapping(address => bool) public isAMM;
+     function addAMM(address _amm ) public onlyOwner {
+         require(!isAMM[_amm] , "already added");
+         isAMM[_amm] = true;
+         AMM.push(_amm);
+     }
+     function removeAMM(address _amm) public onlyOwner {
+         require(isAMM[_amm] , "not added");
+         for(uint256 index ; index <AMM.length; index++){
+             if(AMM[index] == _amm){
+                 AMM[index] = AMM[AMM.length-1];
+                 AMM.pop();
+                 isAMM[_amm] = false;
+                 break;
+                 
+             }
+         }
+     }
      bytes32[] public openLaunchIDs;
      mapping(bytes32 => bool) public isopenLaunchID;
      struct lauchData {
@@ -962,10 +986,10 @@ contract LaunchPad is Ownable{
          _;
      }
      constructor (address timeLockerAddress , address liquidityLockerAddress){
-         ItokenTimeLock tokenTimeLocker = ItokenTimeLock(timeLockerAddress);
-         ILiquidityTimeLock liquidityTimeLocker =  ILiquidityTimeLock(liquidityLockerAddress);
-        AMM.push(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
-        isAMM[0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3] = true;
+          tokenTimeLocker = ItokenTimeLock(timeLockerAddress);
+          liquidityTimeLocker =  ILiquidityTimeLock(liquidityLockerAddress);
+          AMM.push(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+          isAMM[0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3] = true;
      }
     //  ["0x7200704d8BFA013Aa129C0513953C7E2C0388C58","0x68d641560e7E50ce40E7eCb799Ae1FC197236e28","100000000000000000000000","1000000000000000000","2000000000000000000","10000000000000000","1000000000000000000","50000000000000000000000","0","1","5","9","70","true","4","false"] 
     function createLauch(lauchData memory data) public returns(bytes32) {
@@ -1024,7 +1048,7 @@ contract LaunchPad is Ownable{
          require(msg.value >= amount , "insufficient funds");
         require(isSet[launchID] && deposited[launchID] &&  !completed[launchID] && !ended[launchID] , 'invalid launch');
         require(launchTimers[launchID].startTime < block.timestamp , "sales not started");
-        require(launchs[launchID].amountRaised  < launchs[launchID].hardCap && launchs[launchID].amountRaised + amount <= launchs[launchID].hardCap 
+        require(launchs[launchID].amountRaised  < launchRates[launchID].hardCap && launchs[launchID].amountRaised + amount <= launchRates[launchID].hardCap 
         , "hard cap limit reached");
         require(amount >= launchRates[launchID].minContribution && amount <= launchRates[launchID].maxContribution , "amount out of contribution limits");
         
@@ -1033,12 +1057,12 @@ contract LaunchPad is Ownable{
             
         }
         uint256 tokenValue = getTokenValue(launchID , amount);
-        if(!isPresaleBuyer[_msgSender()]){
+        if(!isPresaleBuyer[launchID][_msgSender()]){
          presaleBuyers[launchID].push(_msgSender());
-         isPresaleBuyer[_msgSender()] = true;
+         isPresaleBuyer[launchID][_msgSender()] = true;
          
         }
-        presaleBuyRecord buyerRecord = presaleBuyRecords[launchID][_msgSender()];
+        presaleBuyRecord storage buyerRecord = presaleBuyRecords[launchID][_msgSender()];
         buyerRecord.ethAmount += amount;
         buyerRecord.tokenAmount += tokenValue;
         
@@ -1049,41 +1073,25 @@ contract LaunchPad is Ownable{
     function endLaunch(bytes32 launchID) public {
         require(isSet[launchID] && deposited[launchID] &&  !completed[launchID] && !ended[launchID] , 'invalid launch'); 
         require(launchTimers[launchID].startTime < block.timestamp , "sales not started");
-        require(launchs[launchID].amountRaised >= launchs[launchID].hardCap || launchTimers[launchID].endTime < block.timestamp , "EndLaunch requirements not satisfied");
+        require(launchs[launchID].amountRaised >= launchRates[launchID].hardCap || launchTimers[launchID].endTime < block.timestamp , "EndLaunch requirements not satisfied");
         
-        bool successful;
+        bool _successful;
         
-        if(launchs[launchID].amountRaised >= launchs[launchID].softCap ){
-            successful = true;
+        if(launchs[launchID].amountRaised >= launchRates[launchID].softCap ){
+            _successful = true;
         }
         
-        _endLaunch(launchID , successful);
+        _endLaunch(launchID , _successful);
         
     }
-    function _endLaunch(bytes32 launchID , bool successful) private {
-        if(successful){
-         uint256 liquidityToken =  (launchRates[launchID].listTingRate * launchRates[launchID].hardCap / 1 ether) * launchRates[launchID].percentageLiquidity / 100;
-         
-         uint256 liquidityEth = launchs[launchID].amount * percentageLiquidity / 100;
-         
-         uint256 refundBalance = launchs[launchID].amount - liquidityEth;
-        
-         IBEP20 pair = IBEP20(launchs[launchID].pairAddress);
-         LpBalanceBefore = pair.balanceOf(address(this));
-         addLiquidity(launchs[launchID].token , liquidityToken , liquidityEth);
-         LpBalanceAfter = pair.balanceOf(address(this));
-         //lock liquidity
-         liquidityTimeLocker.lockLiquidity(
-         launchs[launchID].pairAddress ,
-         launchs[launchID].token , 
-         testSwapRouter.WETH() ,  
-         LpBalanceAfter - LpBalanceBefore ,
-         launchTimers[launchID].liquidityLockTime ,
-         launchs[launchID].launchowner
-         );
-          
-        successful[launchID] =true;  
-        }else{
+    function _endLaunch(bytes32 launchID , bool _successful) private {
+        if(_successful){
+            endSucessfulLaunch(launchID);
+            }else{
+           launchs[launchID].tokenBalance += launchs[launchID].tokenSold;
+           launchs[launchID].tokenSold = 0;
+           IBEP20(launchs[launchID].token).transfer(launchs[launchID].launchowner , launchs[launchID].tokenBalance);
+           launchs[launchID].tokenBalance = 0;  
           successful[launchID] =false;   
         }
         
@@ -1091,9 +1099,73 @@ contract LaunchPad is Ownable{
         ended[launchID] =  true;
        
     }
+    function endSucessfulLaunch(bytes32 launchID) private {
+         uint256 liquidityToken =  (launchRates[launchID].listTingRate * launchRates[launchID].hardCap / 1 ether) * launchRates[launchID].percentageLiquidity / 100;
+         launchs[launchID].tokenBalance -= liquidityToken;
+        
+         uint256 liquidityEth = launchs[launchID].amountRaised * launchRates[launchID].percentageLiquidity / 100;
+          
+         uint256 refundBalance = launchs[launchID].amountRaised - liquidityEth;
+         
+        
+         IBEP20 pair = IBEP20(launchs[launchID].pairAddress);
+        uint256 LpBalanceBefore = pair.balanceOf(address(this));
+         addLiquidity(launchs[launchID].token , liquidityToken , liquidityEth);
+        uint256 LpBalanceAfter = pair.balanceOf(address(this));
+         //refund balance
+         
+         launchs[launchID].launchowner.transfer(refundBalance);
+         IBEP20(launchs[launchID].token).transfer(launchs[launchID].launchowner , launchs[launchID].tokenBalance);
+         launchs[launchID].tokenBalance = 0;
+       
+         //lock liquidity
+         {
+             IBEP20(launchs[launchID].pairAddress).approve(address(liquidityTimeLocker) , LpBalanceAfter - LpBalanceBefore );
+         
+         liquidityTimeLocker.lockLiquidity(
+         launchs[launchID].pairAddress ,
+         launchs[launchID].token , 
+         testSwapRouter.WETH() ,  
+          LpBalanceAfter - LpBalanceBefore,
+         launchTimers[launchID].liquidityLockTime ,
+         launchs[launchID].launchowner
+         );
+          
+        successful[launchID] = true;
+         }  
+        
+        }
+    function claimToken(bytes32 launchID) public {
+         require(isSet[launchID]  , 'invalid launch id');
+         require(ended[launchID] , 'Launch not Ended');
+         require(isPresaleBuyer[launchID][_msgSender()] , "not a presale buyer");
+         
+         if(isPresaleLockActive[launchID]){
+            IBEP20(launchs[launchID].token).approve(address(tokenTimeLocker),presaleBuyRecords[launchID][_msgSender()].tokenAmount) ;
+            tokenTimeLocker.locktoken(launchs[launchID].token, presaleBuyRecords[launchID][_msgSender()].tokenAmount  ,  launchTimers[launchID].presaleLockTime , _msgSender() ); 
+             
+         }
+         else {
+           IBEP20(launchs[launchID].token).transfer( _msgSender(),presaleBuyRecords[launchID][_msgSender()].tokenAmount);  
+         }
+         launchs[launchID].tokenSold -= presaleBuyRecords[launchID][_msgSender()].tokenAmount;
+         isPresaleBuyer[launchID][_msgSender()] = false;
+         for(uint256 index ; index < presaleBuyers[launchID].length ; index++){
+             if(presaleBuyers[launchID][index] == _msgSender()){
+                 presaleBuyers[launchID][index] == presaleBuyers[launchID][presaleBuyers[launchID].length-1];
+                 presaleBuyers[launchID].pop();
+                 break;
+             }
+         }
+         
+         if(presaleBuyers[launchID].length == 0){
+             ended[launchID];
+         }
+          
+    }
       function addLiquidity(address tokenAddress, uint256 tokenAmount, uint256 ethAmount) private {
         // approve token transfer to cover all possible scenarios
-        _approve(tokenAddress, address(testSwapRouter), tokenAmount);
+        IBEP20(tokenAddress).approve( address(testSwapRouter), tokenAmount);
 
         // add the liquidity
         testSwapRouter.addLiquidityETH{value: ethAmount}(
@@ -1105,7 +1177,7 @@ contract LaunchPad is Ownable{
             block.timestamp
         );
     }
-    function getTokenValue(bytes32 launchID, uint256 amount ) public view returns {
+    function getTokenValue(bytes32 launchID, uint256 amount ) public view returns(uint256) {
       return  launchRates[launchID].presaleRate * amount / 1 ether;
     }
     function getDepositAmount(bytes32 launchAddress) public view returns(uint256) {
@@ -1160,6 +1232,30 @@ contract LaunchPad is Ownable{
       require(_startTime >= minStartTime , "starttime less than default");
       require(_endTime >= minEndTime , "liquidity lock time less than default"); 
       require(_liquidityLockTime >= minLiquidityLockTime , "liquidity lock time less than default");  
+     }
+     function updateMinStartTime(uint256 _minStartTime) public onlyOwner{
+         minStartTime = _minStartTime;
+     }
+      function updateMinEndTime(uint256 _minEndTime) public onlyOwner{
+         minEndTime = _minEndTime;
+     }
+      function updateMinLiquidityLockTime(uint256 _minLiquidityLockTime) public onlyOwner{
+         minLiquidityLockTime = _minLiquidityLockTime;
+     }
+      function updateSystemMinContribution(uint256 _systemMinContribution) public onlyOwner{
+         systemMinContribution = _systemMinContribution;
+     }
+     function updateSystemMaxContribution(uint256 _systemMaxContribution) public onlyOwner{
+         systemMaxContribution = _systemMaxContribution;
+     }
+     
+     function updateCapSpacePercentage(uint256 _capSpacePercentage) public onlyOwner{
+          
+         capSpacePercentage = _capSpacePercentage;
+     }
+      function updateMinPercentageLiquidity(uint256 _minPercentageLiquidity) public onlyOwner{
+          require(_minPercentageLiquidity <= 100 ,"invalid percentage" );
+         minPercentageLiquidity = _minPercentageLiquidity;
      }
      
 }
