@@ -841,12 +841,11 @@ pragma solidity ^0.7.6;
 }
 
 
-// SPDX-License-Identifier: NULL
 
 pragma solidity ^0.7.6;
 
 
-contract ItokenTimeLock{
+interface ItokenTimeLock{
   
    event tokenLocked(address indexed  tokenAddress ,address indexed locker , address indexed owner ,  uint256 amount , uint256 unlockTime, uint256 lockID);
     event tokenUnLocked(address indexed tokenAddress, address indexed reciever , uint256 amount , uint256 lockID  );
@@ -874,7 +873,7 @@ contract ItokenTimeLock{
 pragma solidity ^0.7.6;
 pragma abicoder v2;
 
-contract LaunchPad {
+contract LaunchPad is Ownable{
     struct presaleBuyRecord {
         uint256 ethAmount;
         uint256 tokenAmount;
@@ -882,37 +881,47 @@ contract LaunchPad {
     struct launch {
         address token;
         address pairAddress;
-        address payable owner;
-        uint256 presaleRate;
-        uint256 softCap;
-        uint256 hardCap;
-        uint256 minContribution;
-        uint256 maxContribution;
-        uint256 listTingRate;
+        address payable launchowner;
         uint256 AMMIndex;
-        uint256 startTime;
-        uint256 endTime;
-        uint256 liquidityLockTime;
-        uint256 presaleLockTime;
-        bool    isPresaleLockActive;
-        uint256 percentageLiquidity;
         uint256 amountRaised;
         uint256 tokenBalance;
-        address[] presaleBuyers;
-        mapping(address => bool) isPresaleBuyer;
-        mapping(address => presaleBuyRecord) presaleBuyRecords;
-        bool whitelistEnabled;
-        address[] whitelistedAddresses;
-        mapping(address => bool) iswhitelistedAddress;
-        bool successful;
-        bool completed;
-        bool ended;
-        bool deposited;
-        bool isSet;
+        uint256 tokenSold;
+        
+        
     }
-    mapping (address => launch) public launchs;
-    mapping (address => bool) public tokenLaunched;
-     
+   struct launchTimer {
+       uint256 startTime;
+        uint256 endTime;
+        uint256 liquidityLockTime;
+        uint256 presaleLockTime;  
+    }
+    struct launchRate{
+         uint256 presaleRate;
+        uint256 softCap;
+        uint256 hardCap;
+       uint256 minContribution;
+        uint256 maxContribution;
+        uint256 listTingRate;
+        uint256 percentageLiquidity;
+    }
+    mapping (bytes32 => launch) public launchs;
+    mapping (bytes32 => address[]) public whitelistedAddresses;
+    mapping (bytes32 => mapping(address => bool) ) public iswhitelistedAddress;
+     mapping (bytes32 =>bool) public  isPresaleLockActive;
+    mapping (bytes32 => bool ) public isSet;
+    mapping (bytes32 => bool ) public deposited;
+    mapping (bytes32 => bool ) public successful;
+    mapping (bytes32 => bool ) public whitelistEnabled;
+    mapping (bytes32 => bool ) public completed;
+    mapping (bytes32 => bool ) public ended;
+    mapping(bytes32 => address[]) public presaleBuyers;
+    mapping (bytes32 => mapping(address => presaleBuyRecord)) public presaleBuyRecords; 
+    mapping(bytes32 => mapping(address => bool)) public isPresaleBuyer;
+    mapping(bytes32 => launchTimer) public launchTimers;
+    mapping(bytes32 => launchRate) public launchRates;
+    mapping (address => bool)  public tokenLaunched;
+    mapping (address => bool)  public tokenLaunchActive;
+    mapping(address => bytes32 ) public tokenLaunchID;
     uint256 capSpacePercentage;
     uint256 systemMinContribution;
     uint256 systemMaxContribution;
@@ -921,83 +930,203 @@ contract LaunchPad {
      uint256 minEndTime;
      uint256 minLiquidityLockTime;
      uint256 minPercentageLiquidity;
-     
+     uint256 tresholdExtraRate;
      uint256 nounce;
-     modifier onlyLaunchOwner(address launchAddress) {
-         require(launchs[launchAddress].tokenowner == _msgSender(), "unAthorized Access");
-     } 
-    function createLauch(
-        address tokenAddress , 
-        address payable tokenowner, 
-        uint256 _presaleRate,
-        uint256 _softCap,
-        uint256 _hardCap,
-        uint256 _minContribution,
-        uint256 _maxContribution,
-        uint256 _listTingRate,
-        uint256 _AMMIndex,
-        uint256 _startTime,
-        uint256 _endTime,
-        uint256 _liquidityLockTime,
-        uint256 _percentageLiquidity,
-        bool _isPresaleLockActive,
-        uint256 _presaleLockTime,
-        bool _whitelistEnabled
-        ) public returns(address) {
+     IUniswapV2Router02 testSwapRouter = IUniswapV2Router02(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+     address[] public AMM;
+     mapping(address => bool) public isAMM;
+     bytes32[] public openLaunchIDs;
+     mapping(bytes32 => bool) public isopenLaunchID;
+     struct lauchData {
+         address tokenAddress ; 
+        address payable tokenowner;
+        uint256 _presaleRate;
+        uint256 _softCap;
+        uint256 _hardCap;
+        uint256 _minContribution;
+        uint256 _maxContribution;
+        uint256 _listTingRate;
+        uint256 _AMMIndex;
+        uint256 _startTime;
+        uint256 _endTime;
+        uint256 _liquidityLockTime;
+        uint256 _percentageLiquidity;
+        bool _isPresaleLockActive;
+        uint256 _presaleLockTime;
+        bool _whitelistEnabled;
+     }
+       
+   
+     modifier onlyLaunchOwner(bytes32 launchAddress) {
+         require(launchs[launchAddress].launchowner == _msgSender(), "unAthorized Access");
+         _;
+     }
+     constructor (address timeLockerAddress , address liquidityLockerAddress){
+         ItokenTimeLock tokenTimeLocker = ItokenTimeLock(timeLockerAddress);
+         ILiquidityTimeLock liquidityTimeLocker =  ILiquidityTimeLock(liquidityLockerAddress);
+        AMM.push(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
+        isAMM[0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3] = true;
+     }
+    //  ["0x7200704d8BFA013Aa129C0513953C7E2C0388C58","0x68d641560e7E50ce40E7eCb799Ae1FC197236e28","100000000000000000000000","1000000000000000000","2000000000000000000","10000000000000000","1000000000000000000","50000000000000000000000","0","1","5","9","70","true","4","false"] 
+    function createLauch(lauchData memory data) public returns(bytes32) {
             // require(tokenowner !=address(0));
-            address tokenPair = extractTokenPair(token);
-            checkCaps(_softCap , _hardCap);
-            checkContributionLimits(_minContribution , _maxContribution);
-            checkRates(_presaleRate, _listTingRate );
-            checkTimer(_startTime , _endTime , _liquidityLockTime);
-            checkPercentageLiquidity(_percentageLiquidity);
-           address launchAddress = address(keccak256(abi.encodePacked(block.timestamp, msg.sender, tokenAddress , tokenPair, nonce)));
+            require(tokenLaunchActive[data.tokenAddress] , "token launch already active");
+            require(data._AMMIndex < AMM.length ,"invalid AMM index");
+            address tokenPair = extractTokenPair(data.tokenAddress);
+            checkCaps(data._softCap , data._hardCap);
+            checkContributionLimits(data._minContribution , data._maxContribution);
+            checkRates(data._presaleRate, data._listTingRate );
+            checkTimer(data._startTime , data._endTime , data._liquidityLockTime);
+            checkPercentageLiquidity(data._percentageLiquidity);
+            bytes32 launchAddress = (keccak256(abi.encodePacked(block.timestamp, msg.sender, data.tokenAddress , tokenPair, nounce)));
            
-            launch  newLaunch = launchs[launchAddress];
+          {
+             
             
-            require(!newLaunch.isSet);
+            require(!isSet[launchAddress]);
             
-            newLaunch.isSet = true;
-            
-         newLaunch.token = tokenAddress;
+        isSet[launchAddress] = true;
+          launch storage newLaunch = launchs[launchAddress];   
+         newLaunch.token = data.tokenAddress;
          newLaunch.pairAddress = tokenPair;
-         newLaunch.owner = tokenowner;
-         newLaunch.presaleRate = _presaleRate;
-         newLaunch.softCap = _softCap;
-         newLaunch.hardCap = _hardCap;
-         newLaunch.minContribution = _maxContribution;
-         newLaunch.maxContribution = _maxContribution;
-         newLaunch.listTingRate = _listTingRate;
-         newLaunch.AMMIndex = _AMMIndex;
-         newLaunch.startTime = block.timestamp + ( _startTime * 1 hours);
-         newLaunch.endTime = newLaunch.startTime + (endTime * 1 hours);
-         newLaunch.liquidityLockTime = liquidityLockTime;
-         newLaunch.presaleLockTime = _presaleLockTime;
-         newLaunch.isPresaleLockActive = _isPresaleLockActive;
-         newLaunch.percentageLiquidity = _percentageLiquidity;
-         newLaunch.whitelistEnabled = _whitelistEnabled;
-         return tokenPair;  
+         newLaunch.launchowner = data.tokenowner;
+         newLaunch.AMMIndex = data._AMMIndex;
+        
+         launchTimer storage newLaunchTimer = launchTimers[launchAddress]; 
+         newLaunchTimer.startTime = block.timestamp + ( data._startTime * 1 hours);
+         newLaunchTimer.endTime = newLaunchTimer.startTime + (data._endTime * 1 hours);
+         newLaunchTimer.liquidityLockTime = data._liquidityLockTime;
+         newLaunchTimer.presaleLockTime = data._presaleLockTime;
+     
+         launchRate storage newlaunchRate = launchRates[launchAddress]; 
+         newlaunchRate.presaleRate = data._presaleRate;
+         newlaunchRate.softCap = data._softCap;
+         newlaunchRate.hardCap = data._hardCap;
+         newlaunchRate.minContribution = data._maxContribution;
+         newlaunchRate.maxContribution = data._maxContribution;
+         newlaunchRate.listTingRate = data._listTingRate;
+         newlaunchRate.percentageLiquidity = data._percentageLiquidity;
+        
+         
+         isPresaleLockActive[launchAddress]  = data._isPresaleLockActive;
+          whitelistEnabled[launchAddress] = data._whitelistEnabled;
+         
+          }
+          tokenLaunchActive[data.tokenAddress] = true;
+          tokenLaunchID[data.tokenAddress] = launchAddress;
+          openLaunchIDs.push(launchAddress);
+          isopenLaunchID[launchAddress] = true;
+         return launchAddress;  
+        }
+       //cancelLaunch
+       
+     function joinLaunch(bytes32 launchID , uint256 amount) public payable {
+         require(msg.value >= amount , "insufficient funds");
+        require(isSet[launchID] && deposited[launchID] &&  !completed[launchID] && !ended[launchID] , 'invalid launch');
+        require(launchTimers[launchID].startTime < block.timestamp , "sales not started");
+        require(launchs[launchID].amountRaised  < launchs[launchID].hardCap && launchs[launchID].amountRaised + amount <= launchs[launchID].hardCap 
+        , "hard cap limit reached");
+        require(amount >= launchRates[launchID].minContribution && amount <= launchRates[launchID].maxContribution , "amount out of contribution limits");
+        
+        if(whitelistEnabled[launchID]){
+            require(iswhitelistedAddress[launchID][_msgSender()], "sender not whitelisted");
+            
+        }
+        uint256 tokenValue = getTokenValue(launchID , amount);
+        if(!isPresaleBuyer[_msgSender()]){
+         presaleBuyers[launchID].push(_msgSender());
+         isPresaleBuyer[_msgSender()] = true;
+         
+        }
+        presaleBuyRecord buyerRecord = presaleBuyRecords[launchID][_msgSender()];
+        buyerRecord.ethAmount += amount;
+        buyerRecord.tokenAmount += tokenValue;
+        
+        launchs[launchID].amountRaised += amount;
+        launchs[launchID].tokenSold += tokenValue;
+        launchs[launchID].tokenBalance -= tokenValue;
+     }
+    function endLaunch(bytes32 launchID) public {
+        require(isSet[launchID] && deposited[launchID] &&  !completed[launchID] && !ended[launchID] , 'invalid launch'); 
+        require(launchTimers[launchID].startTime < block.timestamp , "sales not started");
+        require(launchs[launchID].amountRaised >= launchs[launchID].hardCap || launchTimers[launchID].endTime < block.timestamp , "EndLaunch requirements not satisfied");
+        
+        bool successful;
+        
+        if(launchs[launchID].amountRaised >= launchs[launchID].softCap ){
+            successful = true;
         }
         
-    function getDepositAmount(launchAddress) public returns(uint256) {
-       uint256 presaleToken =  launchs[launchAddress].presaleRate * launchs[launchAddress].hardCap / 1 ether;
-       uint256 liquidityToken =  (launchs[launchAddress].listTingRate * launchs[launchAddress].hardCap / 1 ether) * launchs[launchAddress].percentageLiquidity / 100;
-       uint256 tresholdExtra = (presaleToken + liquidityToken) * tresholdExtraRate / 100;
-       
-       return presaleToken + liquidityToken + tresholdExtra;
+        _endLaunch(launchID , successful);
+        
     }
-    function depositToken(address launchAddress , uint256 amount) public onlyLaunchOwner(launchAddress) {
-        require(!launchs[launchAddress].deposited , "token already deposited");
+    function _endLaunch(bytes32 launchID , bool successful) private {
+        if(successful){
+         uint256 liquidityToken =  (launchRates[launchID].listTingRate * launchRates[launchID].hardCap / 1 ether) * launchRates[launchID].percentageLiquidity / 100;
+         
+         uint256 liquidityEth = launchs[launchID].amount * percentageLiquidity / 100;
+         
+         uint256 refundBalance = launchs[launchID].amount - liquidityEth;
+        
+         IBEP20 pair = IBEP20(launchs[launchID].pairAddress);
+         LpBalanceBefore = pair.balanceOf(address(this));
+         addLiquidity(launchs[launchID].token , liquidityToken , liquidityEth);
+         LpBalanceAfter = pair.balanceOf(address(this));
+         //lock liquidity
+         liquidityTimeLocker.lockLiquidity(
+         launchs[launchID].pairAddress ,
+         launchs[launchID].token , 
+         testSwapRouter.WETH() ,  
+         LpBalanceAfter - LpBalanceBefore ,
+         launchTimers[launchID].liquidityLockTime ,
+         launchs[launchID].launchowner
+         );
+          
+        successful[launchID] =true;  
+        }else{
+          successful[launchID] =false;   
+        }
+        
+        
+        ended[launchID] =  true;
+       
+    }
+      function addLiquidity(address tokenAddress, uint256 tokenAmount, uint256 ethAmount) private {
+        // approve token transfer to cover all possible scenarios
+        _approve(tokenAddress, address(testSwapRouter), tokenAmount);
+
+        // add the liquidity
+        testSwapRouter.addLiquidityETH{value: ethAmount}(
+            tokenAddress,
+            tokenAmount,
+            0, // slippage is unavoidable
+            0, // slippage is unavoidable
+            address(this),
+            block.timestamp
+        );
+    }
+    function getTokenValue(bytes32 launchID, uint256 amount ) public view returns {
+      return  launchRates[launchID].presaleRate * amount / 1 ether;
+    }
+    function getDepositAmount(bytes32 launchAddress) public view returns(uint256) {
+      uint256 presaleToken =  launchRates[launchAddress].presaleRate * launchRates[launchAddress].hardCap / 1 ether;
+      uint256 liquidityToken =  (launchRates[launchAddress].listTingRate * launchRates[launchAddress].hardCap / 1 ether) * launchRates[launchAddress].percentageLiquidity / 100;
+      uint256 tresholdExtra = (presaleToken + liquidityToken) * tresholdExtraRate / 100;
+       
+      return presaleToken + liquidityToken + tresholdExtra;
+    }
+    function depositToken(bytes32 launchAddress , uint256 amount) public onlyLaunchOwner(launchAddress) {
+        require(!deposited[launchAddress], "token already deposited");
         
         uint256 requiredAmount  = getDepositAmount(launchAddress);
         require(amount >= requiredAmount , "amount less than requiredAmount");
         
-        IBEP20 token = IBEP20(launchs[launchAddress].tokenAddress);
+        IBEP20 token = IBEP20(launchs[launchAddress].token);
         uint256 initialTokenBalance = token.balanceOf(address(this));
         token.transferFrom(_msgSender() , address(this) , amount);
         uint256 afterTokenBalance =  token.balanceOf(address(this));
         require(afterTokenBalance - initialTokenBalance >= requiredAmount);
-        launchs[launchAddress].deposited = true;
+        deposited[launchAddress] = true;
         
     }
     function extractTokenPair(address token) private returns(address){
@@ -1009,28 +1138,28 @@ contract LaunchPad {
         return pair;
         
     }
-    function checkPercentageLiquidity(uint256 _percentageLiquidity) private {
+    function checkPercentageLiquidity(uint256 _percentageLiquidity) private view {
         require(_percentageLiquidity <= 100 && _percentageLiquidity >= minPercentageLiquidity , "percentage liquidity lock error");
     }
-    function checkCaps(uint256 _softCap , uint256 _hardCap) private {
+    function checkCaps(uint256 _softCap , uint256 _hardCap) private view {
         require( _softCap != 0 && _hardCap != 0 , "zeros error");
         require(_hardCap > _softCap , "softCap greater than hardCap");
         require((_softCap * (capSpacePercentage/100)) <= _hardCap ,"softCap hardCap percenge difference error");
     }
-    function checkContributionLimits(uint256 _minContribution , uint256 _maxContribution) private {
+    function checkContributionLimits(uint256 _minContribution , uint256 _maxContribution) private pure{
          require( _minContribution != 0 && _maxContribution != 0 , "zeros error"); 
          require(_maxContribution > _minContribution , "minContribution not less than maxContribution");
          
     }
-    function checkRates(uint256 _presaleRate , uint256 listTingRate) private {
+    function checkRates(uint256 _presaleRate , uint256 listTingRate) private  pure{
         require( _presaleRate != 0 && listTingRate != 0 , "zeros error");
-        require( _presaleRate > _listTingRate , "presale rate should be greater than listing rate");
+        require( _presaleRate > listTingRate , "presale rate should be greater than listing rate");
         
     }
-    function  checkTimer(uint256 _startTime ,uint256 _endTime ,uint256 _liquidityLockTime) private {
-       require(_startTime >= minStartTime , "starttime less than default");
-       require(_endTime >= minEndTime , "liquidity lock time less than default"); 
-       require(_liquidityLockTime >= minLiquidityLockTime , "liquidity lock time less than default");  
+    function  checkTimer(uint256 _startTime ,uint256 _endTime ,uint256 _liquidityLockTime) private view{
+      require(_startTime >= minStartTime , "starttime less than default");
+      require(_endTime >= minEndTime , "liquidity lock time less than default"); 
+      require(_liquidityLockTime >= minLiquidityLockTime , "liquidity lock time less than default");  
      }
      
 }
