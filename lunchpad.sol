@@ -874,6 +874,8 @@ pragma solidity ^0.7.6;
 pragma abicoder v2;
 
 contract LaunchPad is Ownable{
+     using SafeMath for uint256;
+    using Address for address;
     struct presaleBuyRecord {
         uint256 ethAmount;
         uint256 tokenAmount;
@@ -942,25 +944,11 @@ contract LaunchPad is Ownable{
      }
      
      mapping(address => bool) public isAMM;
-     function addAMM(address _amm ) public onlyOwner {
-         require(!isAMM[_amm] , "already added");
-         isAMM[_amm] = true;
-         AMM.push(_amm);
-     }
-     function removeAMM(address _amm) public onlyOwner {
-         require(isAMM[_amm] , "not added");
-         for(uint256 index ; index <AMM.length; index++){
-             if(AMM[index] == _amm){
-                 AMM[index] = AMM[AMM.length-1];
-                 AMM.pop();
-                 isAMM[_amm] = false;
-                 break;
-                 
-             }
-         }
-     }
+     
      bytes32[] public openLaunchIDs;
      mapping(bytes32 => bool) public isopenLaunchID;
+      //   ["0x06FaA2768Da5125194Bc50d1632a97067B8053aD","0x68d641560e7E50ce40E7eCb799Ae1FC197236e28","100000000000000000000000","1000000000000000000","2000000000000000000","10000000000000000","1000000000000000000","50000000000000000000000","0","0","1","9","70",true,"4",false]  
+    
      struct lauchData {
          address tokenAddress ; 
         address payable tokenowner;
@@ -985,16 +973,17 @@ contract LaunchPad is Ownable{
          require(launchs[launchAddress].launchowner == _msgSender(), "unAthorized Access");
          _;
      }
-     constructor (address timeLockerAddress , address liquidityLockerAddress){
-          tokenTimeLocker = ItokenTimeLock(timeLockerAddress);
+     constructor (address TokenTimeLockerAddress , address liquidityLockerAddress){
+          tokenTimeLocker = ItokenTimeLock(TokenTimeLockerAddress);
           liquidityTimeLocker =  ILiquidityTimeLock(liquidityLockerAddress);
           AMM.push(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
           isAMM[0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3] = true;
      }
+    //   ["0x93939c9E1176A11D11323c2811563961D415b2b5","0x68d641560e7E50ce40E7eCb799Ae1FC197236e28","100000000000000000000000","1000000000000000000","2000000000000000000","10000000000000000","1000000000000000000","50000000000000000000000","0","0","1","9","70",true,"4","false"]  
     //  ["0x7200704d8BFA013Aa129C0513953C7E2C0388C58","0x68d641560e7E50ce40E7eCb799Ae1FC197236e28","100000000000000000000000","1000000000000000000","2000000000000000000","10000000000000000","1000000000000000000","50000000000000000000000","0","1","5","9","70","true","4","false"] 
     function createLauch(lauchData memory data) public returns(bytes32) {
             // require(tokenowner !=address(0));
-            require(tokenLaunchActive[data.tokenAddress] , "token launch already active");
+            require(!tokenLaunchActive[data.tokenAddress] , "token launch already active");
             require(data._AMMIndex < AMM.length ,"invalid AMM index");
             address tokenPair = extractTokenPair(data.tokenAddress);
             checkCaps(data._softCap , data._hardCap);
@@ -1005,7 +994,7 @@ contract LaunchPad is Ownable{
             bytes32 launchAddress = (keccak256(abi.encodePacked(block.timestamp, msg.sender, data.tokenAddress , tokenPair, nounce)));
            
           {
-             
+           
             
             require(!isSet[launchAddress]);
             
@@ -1017,8 +1006,8 @@ contract LaunchPad is Ownable{
          newLaunch.AMMIndex = data._AMMIndex;
         
          launchTimer storage newLaunchTimer = launchTimers[launchAddress]; 
-         newLaunchTimer.startTime = block.timestamp + ( data._startTime * 1 hours);
-         newLaunchTimer.endTime = newLaunchTimer.startTime + (data._endTime * 1 hours);
+         newLaunchTimer.startTime = block.timestamp.add( data._startTime * 1 hours);
+         newLaunchTimer.endTime = newLaunchTimer.startTime.add(data._endTime * 1 hours);
          newLaunchTimer.liquidityLockTime = data._liquidityLockTime;
          newLaunchTimer.presaleLockTime = data._presaleLockTime;
      
@@ -1026,7 +1015,7 @@ contract LaunchPad is Ownable{
          newlaunchRate.presaleRate = data._presaleRate;
          newlaunchRate.softCap = data._softCap;
          newlaunchRate.hardCap = data._hardCap;
-         newlaunchRate.minContribution = data._maxContribution;
+         newlaunchRate.minContribution = data._minContribution;
          newlaunchRate.maxContribution = data._maxContribution;
          newlaunchRate.listTingRate = data._listTingRate;
          newlaunchRate.percentageLiquidity = data._percentageLiquidity;
@@ -1040,10 +1029,10 @@ contract LaunchPad is Ownable{
           tokenLaunchID[data.tokenAddress] = launchAddress;
           openLaunchIDs.push(launchAddress);
           isopenLaunchID[launchAddress] = true;
-         return launchAddress;  
-        }
-       //cancelLaunch
-       
+          tokenLaunchActive[data.tokenAddress] = true;
+        return launchAddress;  
+      }
+        
      function joinLaunch(bytes32 launchID , uint256 amount) public payable {
          require(msg.value >= amount , "insufficient funds");
         require(isSet[launchID] && deposited[launchID] &&  !completed[launchID] && !ended[launchID] , 'invalid launch');
@@ -1063,15 +1052,15 @@ contract LaunchPad is Ownable{
          
         }
         presaleBuyRecord storage buyerRecord = presaleBuyRecords[launchID][_msgSender()];
-        buyerRecord.ethAmount += amount;
-        buyerRecord.tokenAmount += tokenValue;
+        buyerRecord.ethAmount = buyerRecord.ethAmount.add(amount);
+        buyerRecord.tokenAmount =  buyerRecord.tokenAmount.add(tokenValue);
         
-        launchs[launchID].amountRaised += amount;
-        launchs[launchID].tokenSold += tokenValue;
-        launchs[launchID].tokenBalance -= tokenValue;
+        launchs[launchID].amountRaised = launchs[launchID].amountRaised.add(amount);
+        launchs[launchID].tokenSold = launchs[launchID].tokenSold.add(tokenValue);
+        launchs[launchID].tokenBalance = launchs[launchID].tokenBalance.sub(tokenValue);
      }
     function endLaunch(bytes32 launchID) public {
-        require(isSet[launchID] && deposited[launchID] &&  !completed[launchID] && !ended[launchID] , 'invalid launch'); 
+        require(isSet[launchID] && isopenLaunchID[launchID] && deposited[launchID] &&  !completed[launchID] && !ended[launchID]  , 'invalid launch'); 
         require(launchTimers[launchID].startTime < block.timestamp , "sales not started");
         require(launchs[launchID].amountRaised >= launchRates[launchID].hardCap || launchTimers[launchID].endTime < block.timestamp , "EndLaunch requirements not satisfied");
         
@@ -1088,28 +1077,29 @@ contract LaunchPad is Ownable{
         if(_successful){
             endSucessfulLaunch(launchID);
             }else{
-           launchs[launchID].tokenBalance += launchs[launchID].tokenSold;
+           launchs[launchID].tokenBalance = launchs[launchID].tokenBalance.add(launchs[launchID].tokenSold);
            launchs[launchID].tokenSold = 0;
            IBEP20(launchs[launchID].token).transfer(launchs[launchID].launchowner , launchs[launchID].tokenBalance);
            launchs[launchID].tokenBalance = 0;  
           successful[launchID] =false;   
         }
         
-        
+        tokenLaunchActive[launchs[launchID].token] = false;
         ended[launchID] =  true;
        
     }
     function endSucessfulLaunch(bytes32 launchID) private {
-         uint256 liquidityToken =  (launchRates[launchID].listTingRate * launchRates[launchID].hardCap / 1 ether) * launchRates[launchID].percentageLiquidity / 100;
-         launchs[launchID].tokenBalance -= liquidityToken;
+         uint256 liquidityToken =  (launchRates[launchID].listTingRate.mul(launchRates[launchID].hardCap).div( 1 ether)).mul(launchRates[launchID].percentageLiquidity).div(100);
+         launchs[launchID].tokenBalance = launchs[launchID].tokenBalance.sub(liquidityToken);
         
-         uint256 liquidityEth = launchs[launchID].amountRaised * launchRates[launchID].percentageLiquidity / 100;
+         uint256 liquidityEth = launchs[launchID].amountRaised.mul(launchRates[launchID].percentageLiquidity).div(100);
           
-         uint256 refundBalance = launchs[launchID].amountRaised - liquidityEth;
+         uint256 refundBalance = launchs[launchID].amountRaised.sub(liquidityEth);
          
         
          IBEP20 pair = IBEP20(launchs[launchID].pairAddress);
         uint256 LpBalanceBefore = pair.balanceOf(address(this));
+        
          addLiquidity(launchs[launchID].token , liquidityToken , liquidityEth);
         uint256 LpBalanceAfter = pair.balanceOf(address(this));
          //refund balance
@@ -1120,13 +1110,13 @@ contract LaunchPad is Ownable{
        
          //lock liquidity
          {
-             IBEP20(launchs[launchID].pairAddress).approve(address(liquidityTimeLocker) , LpBalanceAfter - LpBalanceBefore );
+             IBEP20(launchs[launchID].pairAddress).approve(address(liquidityTimeLocker) , LpBalanceAfter.sub(LpBalanceBefore));
          
          liquidityTimeLocker.lockLiquidity(
          launchs[launchID].pairAddress ,
          launchs[launchID].token , 
          testSwapRouter.WETH() ,  
-          LpBalanceAfter - LpBalanceBefore,
+          LpBalanceAfter.sub(LpBalanceBefore),
          launchTimers[launchID].liquidityLockTime ,
          launchs[launchID].launchowner
          );
@@ -1136,7 +1126,8 @@ contract LaunchPad is Ownable{
         
         }
     function claimToken(bytes32 launchID) public {
-         require(isSet[launchID]  , 'invalid launch id');
+        
+         require(isSet[launchID]  && isopenLaunchID[launchID], 'invalid launch id');
          require(ended[launchID] , 'Launch not Ended');
          require(isPresaleBuyer[launchID][_msgSender()] , "not a presale buyer");
          
@@ -1152,14 +1143,16 @@ contract LaunchPad is Ownable{
          isPresaleBuyer[launchID][_msgSender()] = false;
          for(uint256 index ; index < presaleBuyers[launchID].length ; index++){
              if(presaleBuyers[launchID][index] == _msgSender()){
-                 presaleBuyers[launchID][index] == presaleBuyers[launchID][presaleBuyers[launchID].length-1];
+                 presaleBuyers[launchID][index] = presaleBuyers[launchID][presaleBuyers[launchID].length-1];
                  presaleBuyers[launchID].pop();
                  break;
              }
          }
          
          if(presaleBuyers[launchID].length == 0){
-             ended[launchID];
+            //  openLaunchIDs.push(launchAddress);
+          isopenLaunchID[launchID] = false;
+             completed[launchID] = true;
          }
           
     }
@@ -1178,15 +1171,16 @@ contract LaunchPad is Ownable{
         );
     }
     function getTokenValue(bytes32 launchID, uint256 amount ) public view returns(uint256) {
-      return  launchRates[launchID].presaleRate * amount / 1 ether;
+      return  launchRates[launchID].presaleRate.mul(amount).div( 1 ether);
     }
     function getDepositAmount(bytes32 launchAddress) public view returns(uint256) {
-      uint256 presaleToken =  launchRates[launchAddress].presaleRate * launchRates[launchAddress].hardCap / 1 ether;
-      uint256 liquidityToken =  (launchRates[launchAddress].listTingRate * launchRates[launchAddress].hardCap / 1 ether) * launchRates[launchAddress].percentageLiquidity / 100;
-      uint256 tresholdExtra = (presaleToken + liquidityToken) * tresholdExtraRate / 100;
+      uint256 presaleToken =  launchRates[launchAddress].presaleRate.mul(launchRates[launchAddress].hardCap).div(1 ether);
+      uint256 liquidityToken =  (launchRates[launchAddress].listTingRate.mul(launchRates[launchAddress].hardCap).div(1 ether) ).mul(launchRates[launchAddress].percentageLiquidity).div(100);
+      uint256 tresholdExtra = (presaleToken.add(liquidityToken)).mul(tresholdExtraRate).div(100) ;
        
-      return presaleToken + liquidityToken + tresholdExtra;
+      return presaleToken.add(liquidityToken).add(tresholdExtra);
     }
+  
     function depositToken(bytes32 launchAddress , uint256 amount) public onlyLaunchOwner(launchAddress) {
         require(!deposited[launchAddress], "token already deposited");
         
@@ -1199,7 +1193,7 @@ contract LaunchPad is Ownable{
         uint256 afterTokenBalance =  token.balanceOf(address(this));
         require(afterTokenBalance - initialTokenBalance >= requiredAmount);
         deposited[launchAddress] = true;
-        
+        launchs[launchAddress].tokenBalance = amount;
     }
     function extractTokenPair(address token) private returns(address){
         address weth = testSwapRouter.WETH();
@@ -1216,7 +1210,7 @@ contract LaunchPad is Ownable{
     function checkCaps(uint256 _softCap , uint256 _hardCap) private view {
         require( _softCap != 0 && _hardCap != 0 , "zeros error");
         require(_hardCap > _softCap , "softCap greater than hardCap");
-        require((_softCap * (capSpacePercentage/100)) <= _hardCap ,"softCap hardCap percenge difference error");
+        require((_softCap.mul(capSpacePercentage).div(100)) <= _hardCap ,"softCap hardCap percenge difference error");
     }
     function checkContributionLimits(uint256 _minContribution , uint256 _maxContribution) private pure{
          require( _minContribution != 0 && _maxContribution != 0 , "zeros error"); 
@@ -1256,6 +1250,26 @@ contract LaunchPad is Ownable{
       function updateMinPercentageLiquidity(uint256 _minPercentageLiquidity) public onlyOwner{
           require(_minPercentageLiquidity <= 100 ,"invalid percentage" );
          minPercentageLiquidity = _minPercentageLiquidity;
+     }
+       function whitelistAddress(bytes32 launchID , address account ,bool _whitelist) public onlyLaunchOwner(launchID){
+        iswhitelistedAddress[launchID][account] = _whitelist;
+    }
+    function addAMM(address _amm ) public onlyOwner {
+         require(!isAMM[_amm] , "already added");
+         isAMM[_amm] = true;
+         AMM.push(_amm);
+     }
+     function removeAMM(address _amm) public onlyOwner {
+         require(isAMM[_amm] , "not added");
+         for(uint256 index ; index <AMM.length; index++){
+             if(AMM[index] == _amm){
+                 AMM[index] = AMM[AMM.length-1];
+                 AMM.pop();
+                 isAMM[_amm] = false;
+                 break;
+                 
+             }
+         }
      }
      
 }
