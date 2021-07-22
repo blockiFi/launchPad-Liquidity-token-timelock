@@ -823,23 +823,8 @@ contract liquidityTimeLock is Context ,Ownable{
       uint256 public fees;
       address payable feeAddress;
       uint256 public feeBalance;
-      uint256 minLockTimeInHR = 1;
-      function setFees(uint256 _fees) public onlyAdmin{
-          fees = _fees;
-      }
-      function setFeeAddress(address payable _feeAddress) public onlyAdmin{
-          feeAddress = _feeAddress;
-      }
-      function setminLockTimeInHR(uint256 _minLockTimeInHR) public onlyAdmin{
-          minLockTimeInHR = _minLockTimeInHR;
-      }
-      function withdrawFees() public onlyOwner {
-          feeAddress.transfer(feeBalance);
-          feeBalance = 0;
-      }
-      function setExcludeFromFees(address account , bool _exclude) external onlyAdmin{
-           _ExcludedFromFee[account] = _exclude;
-        }  
+      uint256 public minLockTimeInHR = 1;
+      
     struct tokenLP {
         address LPAddress;
         address token1;
@@ -887,6 +872,7 @@ contract liquidityTimeLock is Context ,Ownable{
     } 
     constructor() {
         isAdmin[_msgSender()] = true;
+       
     }
     
     function setAdmin(address _admin , bool _isAdmin ) public onlyOwner {
@@ -903,7 +889,8 @@ contract liquidityTimeLock is Context ,Ownable{
             pairAddress = getPairAddress(token1, token2);
         }else{
             pairAddress = _pairAddress;
-            (token1, token2) = getTokens(_pairAddress);
+            ( token1, token2) = getTokens(_pairAddress);
+            addLpPair(_pairAddress , token1 ,token2);
             
         }
        
@@ -948,6 +935,9 @@ contract liquidityTimeLock is Context ,Ownable{
         address pairAddress = getPairAddress(token1, token2);
         require(pairAddress != address(0) , "pair not created");
         
+        addLpPair(pairAddress , token1 ,token2);
+    }
+    function addLpPair(address pairAddress , address token1 , address token2) private {
         if(!LPtokens[pairAddress].isSet){
           tokenLP storage newLpToken = LPtokens[pairAddress];
           newLpToken.LPAddress = pairAddress;
@@ -956,7 +946,6 @@ contract liquidityTimeLock is Context ,Ownable{
           newLpToken.isSet = true;
         }
     }
-    
     function processPayment(address _pairAddress ,uint256 amount) private  returns (bool){
         if(fees > 0 &&  !_ExcludedFromFee[_msgSender()]){
            require(msg.value >= fees , "insuficient fiat fee balance");
@@ -1053,7 +1042,17 @@ contract liquidityTimeLock is Context ,Ownable{
                 currentUserLpLock.activeLocksID.pop();
             }
         }
-        
+         bool inArray;
+           
+           for(uint256 index; index < userLPlocksAddress[to].length ; index++){
+               if(userLPlocksAddress[to][index] == _pairAddress){
+                   inArray = true;
+                   break;
+               }
+               
+           }
+           if(!inArray)  userLPlocksAddress[to].push(_pairAddress);
+           
        userLPlock storage newLpLock = userLPlocks[_pairAddress][to];
        newLpLock.LPAddress = _pairAddress;
        newLpLock.locks++;
@@ -1096,5 +1095,26 @@ contract liquidityTimeLock is Context ,Ownable{
     }
     function getUserLPlocksAddress() public view returns(address[] memory){
         return userLPlocksAddress[_msgSender()];
+    }
+    function setFees(uint256 _fees) public onlyAdmin{
+          fees = _fees;
+      }
+      function setFeeAddress(address payable _feeAddress) public onlyAdmin{
+          feeAddress = _feeAddress;
+      }
+      function setminLockTimeInHR(uint256 _minLockTimeInHR) public onlyAdmin{
+          minLockTimeInHR = _minLockTimeInHR;
+      }
+      function withdrawFees() public onlyOwner {
+          require(feeBalance > 0,"insufient funds");
+          feeAddress.transfer(feeBalance);
+          feeBalance = 0;
+      }
+      function setExcludeFromFees(address account , bool _exclude) external onlyAdmin{
+           _ExcludedFromFee[account] = _exclude;
+        }  
+    function updateSwapRouter(address _router) public onlyAdmin() {
+        SwapRouter = IUniswapV2Router02(_router);
+        
     }
 }
