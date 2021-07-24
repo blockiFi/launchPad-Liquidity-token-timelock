@@ -897,6 +897,7 @@ contract LaunchPad is Ownable{
         uint256 liquidityLockTime;
         uint256 presaleLockTime;  
     }
+
     struct launchRate{
          uint256 presaleRate;
         uint256 softCap;
@@ -947,8 +948,7 @@ contract LaunchPad is Ownable{
      
      bytes32[] public openLaunchIDs;
      mapping(bytes32 => bool) public isopenLaunchID;
-      //   ["0x06FaA2768Da5125194Bc50d1632a97067B8053aD","0x68d641560e7E50ce40E7eCb799Ae1FC197236e28","100000000000000000000000","1000000000000000000","2000000000000000000","10000000000000000","1000000000000000000","50000000000000000000000","0","0","1","9","70",true,"4",false]  
-    
+      
      struct lauchData {
          address tokenAddress ; 
         address payable tokenowner;
@@ -973,6 +973,10 @@ contract LaunchPad is Ownable{
          require(launchs[launchAddress].launchowner == _msgSender(), "unAthorized Access");
          _;
      }
+     
+      event launchCreated(bytes32 launchID ,address indexed token , uint256 presaleRate ,  uint256 _startTime , uint256 _endTime, bool _whitelistEnabled);
+    event launchEnded(bytes32 launchID ,address indexed token ,bool successful );
+    
      constructor (address TokenTimeLockerAddress , address liquidityLockerAddress){
           tokenTimeLocker = ItokenTimeLock(TokenTimeLockerAddress);
           liquidityTimeLocker =  ILiquidityTimeLock(liquidityLockerAddress);
@@ -1023,13 +1027,14 @@ contract LaunchPad is Ownable{
          
          isPresaleLockActive[launchAddress]  = data._isPresaleLockActive;
           whitelistEnabled[launchAddress] = data._whitelistEnabled;
-         
+          emit launchCreated( launchAddress ,data.tokenAddress , data._presaleRate,  newLaunchTimer.startTime  , newLaunchTimer.endTime ,  data._whitelistEnabled);
           }
           tokenLaunchActive[data.tokenAddress] = true;
           tokenLaunchID[data.tokenAddress] = launchAddress;
           openLaunchIDs.push(launchAddress);
           isopenLaunchID[launchAddress] = true;
           tokenLaunchActive[data.tokenAddress] = true;
+         
         return launchAddress;  
       }
         
@@ -1086,7 +1091,7 @@ contract LaunchPad is Ownable{
         
         tokenLaunchActive[launchs[launchID].token] = false;
         ended[launchID] =  true;
-       
+     emit  launchEnded( launchID ,launchs[launchID].token , _successful );
     }
     function endSucessfulLaunch(bytes32 launchID) private {
          uint256 liquidityToken =  (launchRates[launchID].listTingRate.mul(launchRates[launchID].hardCap).div( 1 ether)).mul(launchRates[launchID].percentageLiquidity).div(100);
